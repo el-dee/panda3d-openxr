@@ -5,7 +5,7 @@ import logging
 from OpenGL import GL
 import os
 from panda3d.core import load_prc_file_data, NodePath, LMatrix4
-from panda3d.core import WindowProperties, FrameBufferProperties, Texture, PythonCallbackObject
+from panda3d.core import FrameBufferProperties, PythonCallbackObject
 from panda3d.core import Camera, MatrixLens
 import xr
 
@@ -19,10 +19,6 @@ from .system import System
 
 logging.basicConfig(level=logging.DEBUG)
 
-# HMD screens are never a power of 2 size
-load_prc_file_data("", "textures-power-2 none")
-#load_prc_file_data("", "notify-level-gsg spam")
-
 # Disable v-sync, it will be managed by waitGetPoses()
 load_prc_file_data("", "sync-video 0")
 # NVidia driver requires this env variable to be set to 0 to disable v-sync
@@ -34,10 +30,8 @@ os.environ['vblank_mode'] = "0"
 class P3DOpenXR():
     def __init__(self, base=None):
         """
-        Wrapper around pyopenvr to allow it to work with Panda3D.
+        Wrapper around pyopenxr to allow it to work with Panda3D.
         See the init() method below for the actual initialization.
-
-        * verbose specifies if the library prints status information when running.
         """
 
         self.logger = logging.getLogger("p3dopenxr")
@@ -45,7 +39,6 @@ class P3DOpenXR():
             base = __builtins__.get('base')
         self.base = base
         self.buffers = []
-        self.textures = []
         self.cams = []
         self.dr: list = []
         self.nextsort = self.base.win.getSort() - 1000
@@ -63,28 +56,24 @@ class P3DOpenXR():
         self.far: float = None
         atexit.register(self.destroy)
 
-    def create_buffer(self, name, texture, width, height, fbprops):
+    def create_default_fb_props(self):
+        props = FrameBufferProperties(FrameBufferProperties.get_default())
+        props.set_back_buffers(0)
+        props.set_rgb_color(1)
+        props.set_alpha_bits(0)
+        props.set_srgb_color(True)
+        props.set_depth_bits(1)
+        return props
+
+    def create_buffer(self, name, width, height, fb_props):
         """
         Create a render buffer with the given properties.
         """
 
-        winprops = WindowProperties()
-        winprops.set_size(width, height)
-        props = FrameBufferProperties(FrameBufferProperties.get_default())
-        props.set_back_buffers(0)
-        props.set_rgb_color(1)
-        props.set_alpha_bits(1)
-        props.set_rgb_color(1)
-        props.set_depth_bits(1)
-        if fbprops is not None:
-            props.add_properties(fbprops)
-
-        buffer = self.base.win.make_texture_buffer(name, width, height, to_ram=False, fbp=props)
+        buffer = self.base.win.make_texture_buffer(name, width, height, to_ram=False, fbp=fb_props)
         if buffer is not None:
             buffer.disable_clears()
-            #buffer.set_clear_depth(1)
-            #buffer.setClearColorActive(1)
-            #buffer.setClearColor(LColor(0, 0, 0, 0))
+            buffer.set_active(True)
             buffer.clear_render_textures()
             buffer.set_sort(self.nextsort)
             self.nextsort += 1
@@ -92,31 +81,10 @@ class P3DOpenXR():
             self.logger.error("Could not create buffer")
         return buffer
 
-    def create_texture(self):
-        texture = Texture()
-        texture.set_wrap_u(Texture.WMClamp)
-        texture.set_wrap_v(Texture.WMClamp)
-        texture.set_minfilter(Texture.FT_linear)
-        texture.set_magfilter(Texture.FT_linear)
-        return texture
-
-    def create_renderer(self, name, texture, width, height, msaa):
-        """
-        Create and configure a render to texture pipeline and attach it the given camera and draw callback.
-        """
-
-        fbprops = FrameBufferProperties()
-        fbprops.setRgbaBits(1, 1, 1, 1)
-        if msaa > 0:
-            fbprops.setMultisamples(msaa)
-        buffer = self.create_buffer(name, texture, width, height, fbprops=fbprops)
-        buffer.set_active(True)
-        #self.depth = Texture()
-        #self.buffer.add_render_texture(self.depth, GraphicsOutput.RTMBindOrCopy, GraphicsOutput.RTP_depth)
-        #self.buffer.add_render_texture(self.texture, GraphicsOutput.RTMBindOrCopy, GraphicsOutput.RTP_color)
-        return buffer
-
     def create_display_region(self, buffer, camera, callback, cc=None):
+        """
+        Create and configure a display region and attach it the given camera and draw callback.
+        """
         dr = buffer.make_display_region(0, 1, 0, 1)
         dr.set_camera(camera)
         dr.set_active(1)
@@ -124,8 +92,8 @@ class P3DOpenXR():
         if callback is not None:
             dr.set_draw_callback(PythonCallbackObject(callback))
         if cc is not None:
-            dr.setClearColorActive(1)
-            dr.setClearColor(cc)
+            dr.set_clear_color_active(1)
+            dr.set_clear_color(cc)
 
     def create_camera(self, name: str) -> Camera:
         """
@@ -146,7 +114,10 @@ class P3DOpenXR():
         self.empty_world = NodePath()
         self.base.camera.reparent_to(self.empty_world)
 
-    def init(self, near=0.01, far=100.0, root=None, msaa=0, mirroring=0, srgb=None):
+    def init(self, near=0.01, far=100.0, root=None, fb_props=None, mirroring=0):
+        if fb_props is None:
+            fb_props = self.create_default_fb_props()
+        sc_format = self.fb_props_to_gl_mode(fb_props)
         self.instance = Instance()
         self.system = System(self.instance)
         self.session = Session(self.system, self.base)
@@ -154,7 +125,7 @@ class P3DOpenXR():
         self.view_space = Space(self.session, reference_space_type='View')
         self.app_space = self.tracking_space
         for view in self.system.views:
-            self.swapchains.append(Swapchain(self.session, view, sc_format=GL.GL_SRGB8_ALPHA8, sample_count=1))
+            self.swapchains.append(Swapchain(self.session, view, sc_format=sc_format, sample_count=1))
         self.layer = ProjectionLayer(self.session, self.app_space, len(self.system.views))
         self.action_set = ActionSet(self.session, self.app_space, "default", "Default action set", priority=0)
 
@@ -176,9 +147,8 @@ class P3DOpenXR():
             cam_node = self.create_camera(f'cam-{i}')
             cam = self.tracking_space_anchor.attach_new_node(cam_node)
             self.cams.append(cam)
-            texture = self.create_texture()
-            buffer = self.create_renderer(
-                f"xr-render-buffer-{i}", texture, swapchain.width, swapchain.height, msaa)
+            buffer = self.create_buffer(
+                f"xr-render-buffer-{i}", swapchain.width, swapchain.height, fb_props)
             self.dr.append(self.create_display_region(buffer, self.cams[i], callback=partial(self.render, i, last)))
             self.buffers.append(buffer)
 
@@ -270,7 +240,6 @@ class P3DOpenXR():
         GL.glClearDepth(1.0)
         GL.glClearColor(0, 0, 0, 0)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT | GL.GL_STENCIL_BUFFER_BIT)
-        #GL.glClearBufferfv(GL.GL_COLOR, 0, (c_byte * 4)(0, 0, 0, 0))
         # Perform the actual Draw jobs
         cbdata.upcall()
         swapchain.release_image_info()
@@ -285,3 +254,70 @@ class P3DOpenXR():
             self.session.end_frame(self.layer)
             self.end_frame_called = True
         return task.cont
+
+    def fb_props_to_gl_mode(self, fb_props: FrameBufferProperties):
+        """
+        Convert a frame buffer configuration into an OpenGL format
+        """
+
+        if fb_props.alpha_bits == 0:
+            if fb_props.srgb_color:
+                gl_format = GL.GL_SRGB8
+            elif (fb_props.color_bits > 16 * 3 or
+                  fb_props.red_bits > 16 or
+                  fb_props.green_bits > 16 or
+                  fb_props.blue_bits > 16):
+                # 32-bit, which is always floating-point.
+                if fb_props.blue_bits > 0 or fb_props.color_bits == 1 or fb_props.color_bits > 32 * 2:
+                    gl_format = GL.GL_RGB32F
+                elif fb_props.green_bits > 0 or fb_props.color_bits > 32:
+                    gl_format = GL.GL_RG32F
+                else:
+                    gl_format = GL.GL_R32F
+            elif fb_props.float_color:
+                # 16-bit floating-point.
+                if fb_props.blue_bits > 10 or fb_props.color_bits == 1 or fb_props.color_bits > 32:
+                    gl_format = GL.GL_RGB16F
+                elif fb_props.blue_bits > 0:
+                    if fb_props.red_bits > 11 or fb_props.green_bits > 11:
+                        gl_format = GL.GL_RGB16F
+                    else:
+                        gl_format = GL.GL_R11F_G11F_B10F
+                elif fb_props.green_bits > 0 or fb_props.color_bits > 16:
+                    gl_format = GL.GL_RG16F
+                else:
+                    gl_format = GL.GL_R16F
+            elif (fb_props.color_bits > 10 * 3 or
+                  fb_props.red_bits > 10 or
+                  fb_props.green_bits > 10 or
+                  fb_props.blue_bits > 10):
+                # 16-bit normalized.
+                if fb_props.blue_bits > 0 or fb_props.color_bits == 1 or fb_props.color_bits > 16 * 2:
+                    gl_format = GL.GL_RGBA16
+                elif fb_props.green_bits > 0 or fb_props.color_bits > 16:
+                    gl_format = GL.GL_RG16
+                else:
+                    gl_format = GL.GL_R16
+            elif (fb_props.color_bits > 8 * 3 or
+                  fb_props.red_bits > 8 or
+                  fb_props.green_bits > 8 or
+                  fb_props.blue_bits > 8):
+                gl_format = GL.GL_RGB10_A2
+            else:
+                gl_format = GL.GL_RGB
+        else:
+            if fb_props.srgb_color:
+                gl_format = GL.GL_SRGB8_ALPHA8
+            elif fb_props.float_color:
+                if fb_props.color_bits > 16 * 3:
+                    gl_format = GL.GL_RGBA32F
+                else:
+                    gl_format = GL.GL_RGBA16F
+            else:
+                if fb_props.color_bits > 16 * 3:
+                    gl_format = GL.GL_RGBA32F
+                elif fb_props.color_bits > 8 * 3:
+                    gl_format = GL.GL_RGBA16
+                else:
+                    gl_format = GL.GL_RGBA
+        return gl_format
