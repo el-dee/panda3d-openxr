@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "panda3d-openxr"
+version = "0.1.0"
+dependencies = [
+  "pyopenxr >= 1.1.0",
+  "PyOpenGL >= 3.0.0",
+  "panda3d >= 1.10.0",
+]
+requires-python = ">=3.8"
+authors = [
+  {name = "Laurent Deru", email = "laurent.deru@gmail.com"},
+]
+description = "Lovely Spam! Wonderful Spam!"
+readme = "README.md"
+license = {file = "LICENSE"}
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Topic :: Multimedia :: Graphics :: 3D Rendering",
+  "License :: OSI Approved :: Apache Software License",
+]
+
+[project.urls]
+Repository = "https://github.com/el-dee/panda3d-openxr"
+"Bug Tracker" = "https://github.com/el-dee/panda3d-openxr/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["p3dopenxr"]
