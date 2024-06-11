@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "panda3d-openxr"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
   "pyopenxr >= 1.1.0",
   "PyOpenGL >= 3.0.0",
