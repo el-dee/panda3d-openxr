@@ -50,6 +50,7 @@ The init method has a couple of parameters to configure :
     * The near and far planes of the created cameras
     * The framebuffer properties to create the rendering chain
 
+
 ## Documentation
 
 There is no documentation available yet...
@@ -64,3 +65,11 @@ All the examples are found under samples/ directory, to launch them simply go to
 ### Minimal
 
 In minimal you can find a minimal setup that will draw a Panda avatar in front of you, and a (ugly) cube where your hands ought to be.
+
+
+## License and Acknowledgments
+
+This library is licensed under the "Apache License Version 2.0", see the file LICENSE for the full text of the license.
+
+This code is heavily based upon the `hello_xr` example made by the Khronos Group, and ported to the Python Langage by "Christopher Bump", author of the PyOpenXR library.
+Many thanks to them as without their work this library wouldn't exist at all.
